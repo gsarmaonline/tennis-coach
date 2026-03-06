@@ -7,9 +7,8 @@ Authentication routes:
 from __future__ import annotations
 
 import secrets
-from datetime import datetime
+from datetime import datetime, timezone
 
-import redis
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import RedirectResponse
 
@@ -18,13 +17,10 @@ from api.auth.google import build_auth_url, exchange_code, verify_id_token
 from api.auth.jwt import create_access_token
 from api.models import UserResponse
 from api.services import user_store
+from api.services.redis_client import get_redis_client
 from api.settings import settings
 
 router = APIRouter(prefix="/auth", tags=["auth"])
-
-
-def _redis() -> redis.Redis:
-    return redis.Redis.from_url(settings.redis_url, decode_responses=True)
 
 
 def _state_key(state: str) -> str:
@@ -35,7 +31,7 @@ def _state_key(state: str) -> str:
 async def login_with_google():
     """Generate a CSRF state token, store it in Redis, and redirect to Google consent."""
     state = secrets.token_urlsafe(32)
-    r = _redis()
+    r = get_redis_client()
     r.set(_state_key(state), "1", ex=settings.oauth_state_ttl)
     return RedirectResponse(url=build_auth_url(state))
 
@@ -50,7 +46,7 @@ async def oauth_callback(
     Exchange the code, find-or-create the user, sign a JWT, and redirect to
     the frontend with the token.
     """
-    r = _redis()
+    r = get_redis_client()
     state_key = _state_key(state)
     if not r.get(state_key):
         raise HTTPException(status_code=400, detail="Invalid or expired OAuth state.")
@@ -79,9 +75,7 @@ async def oauth_callback(
             email=email,
             name=name,
             picture=picture,
-            last_login=__import__("datetime").datetime.now(
-                __import__("datetime").timezone.utc
-            ).isoformat(),
+            last_login=datetime.now(timezone.utc).isoformat(),
         )
         user = user_store.get_user(user["user_id"])
 

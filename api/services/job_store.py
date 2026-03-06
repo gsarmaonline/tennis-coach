@@ -27,15 +27,10 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from typing import Any
 
-import redis
-
+from api.services.redis_client import get_redis_client
 from api.settings import settings
-
-
-def _redis() -> redis.Redis:
-    return redis.Redis.from_url(settings.redis_url, decode_responses=True)
 
 
 def _key(job_id: str) -> str:
@@ -55,10 +50,10 @@ def create_job(
     user_id: str = "",
     original_filename: str = "",
     activity: str = "tennis",
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Insert a new job record with status=pending. Returns the record."""
     now = _now_iso()
-    record: Dict[str, Any] = {
+    record: dict[str, Any] = {
         "job_id": job_id,
         "user_id": user_id,
         "original_filename": original_filename,
@@ -69,7 +64,7 @@ def create_job(
         "created_at": now,
         "updated_at": now,
     }
-    r = _redis()
+    r = get_redis_client()
     r.set(_key(job_id), json.dumps(record), ex=settings.job_ttl)
     return record
 
@@ -82,32 +77,32 @@ def update_job(job_id: str, **fields: Any) -> None:
                    frame_data, fps, total_source_frames,
                    metrics, coaching_report, error.
     """
-    r = _redis()
+    r = get_redis_client()
     raw = r.get(_key(job_id))
     if raw is None:
         return
-    record: Dict[str, Any] = json.loads(raw)
+    record: dict[str, Any] = json.loads(raw)
     record.update(fields)
     record["updated_at"] = _now_iso()
     r.set(_key(job_id), json.dumps(record), ex=settings.job_ttl)
 
 
-def get_job(job_id: str) -> Optional[Dict[str, Any]]:
+def get_job(job_id: str) -> dict[str, Any] | None:
     """Return the job record, or None if not found."""
-    r = _redis()
+    r = get_redis_client()
     raw = r.get(_key(job_id))
     if raw is None:
         return None
     return json.loads(raw)
 
 
-def get_video_cache(user_id: str, file_hash: str) -> Optional[str]:
+def get_video_cache(user_id: str, file_hash: str) -> str | None:
     """Return existing s3_key for this user+hash combo, or None."""
-    r = _redis()
+    r = get_redis_client()
     return r.get(f"vidcache:{user_id}:{file_hash}")
 
 
 def set_video_cache(user_id: str, file_hash: str, s3_key: str, ttl: int = 604800) -> None:
     """Store user+hash → s3_key mapping with TTL (default 7 days)."""
-    r = _redis()
+    r = get_redis_client()
     r.set(f"vidcache:{user_id}:{file_hash}", s3_key, ex=ttl)
